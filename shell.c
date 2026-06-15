@@ -1,79 +1,101 @@
 #include "shell.h"
-#include "keyboard.h"
 #include "vga.h"
+#include "keyboard.h"
 #include "klib.h"
+#include "timer.h"  // <--- ДОБАВИТЬ (для timer_get_ticks и timer_get_frequency)
 
-#define CMD_BUFFER_SIZE 256
-
-// --- Внутренние команды Shell ---
-
-static void cmd_help(void) {
-    k_print("\n");
+static void print_help(void) {
+    vga_set_color(VGA_COLOR_CYAN, VGA_COLOR_BLACK);
     k_print("Available commands:\n");
-    k_print("  help   - Show this help message\n");
-    k_print("  clear  - Clear the screen\n");
+    vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    k_print("  help    - Show this help message\n");
+    k_print("  clear   - Clear the screen\n");
+    k_print("  uptime  - Show system uptime\n");  // <--- ДОБАВИТЬ
 }
 
-static void shell_execute(const char* cmd) {
+static void execute_command(const char* cmd) {
     if (k_strcmp(cmd, "help") == 0) {
-        cmd_help();
-    } else if (k_strcmp(cmd, "clear") == 0) {
-        clear(); // Вызываем функцию очистки VGA
-    } else if (k_strlen(cmd) > 0) {
-        k_print("shell: command not found: ");
+        print_help();
+    }
+    else if (k_strcmp(cmd, "clear") == 0) {
+        clear();
+    }
+    // === НОВАЯ КОМАНДА: UPTIME ===
+    else if (k_strcmp(cmd, "uptime") == 0) {
+        uint32_t ticks = timer_get_ticks();
+        uint32_t freq = timer_get_frequency(); // Должно быть 1000
+        
+        // Конвертация в секунды
+        uint32_t total_seconds = ticks / freq;
+        
+        // Разбивка на часы, минуты, секунды
+        uint32_t hours   = total_seconds / 3600;
+        uint32_t minutes = (total_seconds % 3600) / 60;
+        uint32_t seconds = total_seconds % 60;
+        
+        // Красивый вывод с цветами
+        vga_set_color(VGA_COLOR_CYAN, VGA_COLOR_BLACK);
+        k_print("System Uptime: ");
+        
+        vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+        k_printf("%d hours, %d minutes, %d seconds\n", hours, minutes, seconds);
+        
+        vga_set_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK); // Если есть такой цвет, иначе LIGHT_GREY
+        k_printf("  (Raw ticks: %d @ %d Hz)\n", ticks, freq);
+        
+        vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    }
+    else if (k_strlen(cmd) > 0) {
+        vga_set_color(VGA_COLOR_RED, VGA_COLOR_BLACK);
+        k_print("Unknown command: ");
         k_print(cmd);
         k_print("\n");
+        vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     }
 }
 
-// --- Главный цикл оболочки ---
-
 void shell_run(void) {
-    char cmd_buffer[CMD_BUFFER_SIZE];
-    int cmd_index = 0;
+    char buffer[256];
+    int pos = 0;
     
-    k_print("\nBare Metal OS Shell initialized.\n");
-    k_print("Type 'help' for available commands.\n\n");
-    k_print("shell# ");
-
-
+    vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    
     while (1) {
-        char c = k_getchar();
+        k_print("> ");
+        pos = 0;
+        buffer[0] = '\0';
         
-        if (c == 0) {
-            // Буфер клавиатуры пуст. 
-            // Усыпляем CPU до следующего аппаратного прерывания (IRQ).
-            __asm__ volatile("hlt");
-            continue;
-        }
-        
-        if (c == '\n') {
-            // Нажат Enter
-            vga_putc('\n');
-            cmd_buffer[cmd_index] = '\0'; // Завершаем строку для k_strcmp
+        // Read command (существующий код чтения из буфера клавиатуры)
+        while (1) {
+            char c = k_getchar();
             
-            shell_execute(cmd_buffer);
-            
-            cmd_index = 0; // Сбрасываем индекс буфера
-            k_print("\n");
-            k_print("shell# ");
-        } 
-        else if (c == '\b') {
-            // Нажат Backspace
-            if (cmd_index > 0) {
-                cmd_index--;
-                cmd_buffer[cmd_index] = '\0';
-                vga_putc('\b'); // Делегируем стирание символа VGA-драйверу
+            if (c == 0) {
+                __asm__ volatile("hlt");
+                continue;
             }
-        } 
-        else if (c >= 32 && c < 127) {
-            // Только печатные ASCII символы (игнорируем Tab, ESC и прочее)
-            if (cmd_index < CMD_BUFFER_SIZE - 1) {
-                cmd_buffer[cmd_index] = c;
-                cmd_index++;
-                cmd_buffer[cmd_index] = '\0'; // Держим строку нуль-терминированной
-                vga_putc(c); // Эхо на экран
+            
+            if (c == '\n') {
+                vga_putc('\n');
+                buffer[pos] = '\0';
+                break;
+            }
+            else if (c == '\b') {
+                if (pos > 0) {
+                    pos--;
+                    buffer[pos] = '\0';
+                    vga_putc('\b');
+                }
+            }
+            else if (c >= 32 && c < 127) {
+                if (pos < 255) {
+                    buffer[pos++] = c;
+                    buffer[pos] = '\0';
+                    vga_putc(c);
+                }
             }
         }
+        
+        // Execute command
+        execute_command(buffer);
     }
 }

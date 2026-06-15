@@ -4,6 +4,7 @@
 #include "idt.h"
 #include "keyboard.h"
 #include "shell.h"
+#include "timer.h"
 
 void kernel_main() {
     gdt_install();
@@ -20,9 +21,14 @@ void kernel_main() {
     
     // Установка драйвера клавиатуры
     keyboard_install();
+
+    timer_init(1000);  // 1000 Гц = 1 тик каждые 1 мс
     
     vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-    k_print("\n System ready. Start typing:\n> ");
+    k_print("\n System ready. Start typing:\n ");
+
+    
+    k_print("\n");
 
     shell_run();
 }
