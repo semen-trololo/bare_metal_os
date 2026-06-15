@@ -100,7 +100,29 @@ void k_itoa(int value, char* buf, int base) {
     
     buf[j] = '\0';
 }
-
+uint32_t k_atoh(const char* str) {
+    uint32_t result = 0;
+    // Пропускаем префикс 0x или 0X, если он есть
+    if (str[0] == '0' && (str[1] == 'x' || str[1] == 'X')) {
+        str += 2;
+    }
+    
+    while (*str) {
+        char c = *str++;
+        result <<= 4; // Сдвигаем на 4 бита (умножаем на 16)
+        
+        if (c >= '0' && c <= '9') {
+            result |= (c - '0');
+        } else if (c >= 'a' && c <= 'f') {
+            result |= (c - 'a' + 10);
+        } else if (c >= 'A' && c <= 'F') {
+            result |= (c - 'A' + 10);
+        } else {
+            break; // Встретили не-hex символ, останавливаемся
+        }
+    }
+    return result;
+}
 void k_uitoa(unsigned int value, char* buf, int base) {
     char tmp[33];
     int i = 0;

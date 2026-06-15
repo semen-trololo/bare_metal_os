@@ -15,5 +15,7 @@ void k_itoa(int value, char* buf, int base);
 int k_atoi(const char* str);
 void k_uitoa(unsigned int value, char* buf, int base);
 void k_printf(const char* fmt, ...);
+int k_atoi(const char* str);
+uint32_t k_atoh(const char* str); // Новая функция: ASCII to Hex
 
 #endif
