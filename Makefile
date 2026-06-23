@@ -1,21 +1,31 @@
 # Компиляторы
-CC = i686-elf-gcc
+# Если ты успешно собрал i686-elf-gcc (Путь Б), оставь как есть.
+# Если используешь системный (Путь А), замени на: i686-linux-gnu-gcc
+CC = i686-linux-gnu-gcc
 AS = nasm
 
 # Директории
 BUILD_DIR = build
 
-# Флаги компиляции
-CFLAGS = -m32 -std=c99 -ffreestanding -O2 -Wall -Wextra -nostdlib -Iinclude
+# Флаги компиляции (Обезвреживание Kali/Debian)
+# -fno-pie -fno-pic: Запрещаем генерацию позиционно-независимого кода (критично для ядра!)
+# -fno-stack-protector: Отключаем stack canaries, чтобы не требовать __stack_chk_fail из glibc
+# -std=gnu99: Включаем GNU-расширения для атрибутов и inline assembly
+CFLAGS = -m32 -std=gnu99 -ffreestanding -O2 -Wall -Wextra -Iinclude -fno-pie -fno-pic -fno-stack-protector
+
+# Флаги ассемблера
 ASFLAGS = -f elf32
-LDFLAGS = -T linker.ld -nostdlib
+
+# Флаги линковки
+# -no-pie: Запрещаем линкеру создавать PIE-исполняемый файл
+# -lgcc: Линкуем libgcc для встроенных функций (деление 64-битных чисел и т.д.)
+LDFLAGS = -T linker.ld -nostdlib -no-pie -lgcc
 
 # Автоматический поиск всех исходников в корне
 C_SOURCES = $(wildcard *.c)
 ASM_SOURCES = $(wildcard *.asm)
 
 # Генерация путей к объектным файлам внутри папки build/
-# patsubst заменяет 'kernel.c' на 'build/kernel.o'
 C_OBJS = $(patsubst %.c,$(BUILD_DIR)/%.o,$(C_SOURCES))
 ASM_OBJS = $(patsubst %.asm,$(BUILD_DIR)/%.o,$(ASM_SOURCES))
 OBJ = $(C_OBJS) $(ASM_OBJS)
@@ -28,11 +38,9 @@ all: $(TARGET)
 
 # Компоновка (Linking)
 $(TARGET): $(OBJ)
-	$(CC) $(LDFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
 
 # Компиляция C файлов
-# Символ '|' означает order-only prerequisite (папка должна существовать,
-# но её наличие не триггерит пересборку, если она уже есть)
 $(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -44,12 +52,12 @@ $(BUILD_DIR)/%.o: %.asm | $(BUILD_DIR)
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-# Очистка (теперь просто удаляем всю папку build)
+# Очистка
 clean:
 	rm -rf $(BUILD_DIR)
 
 # Запуск в QEMU
 run: $(TARGET)
-	qemu-system-i386 -kernel $(TARGET)
+	qemu-system-i386 -m 512M -kernel $(TARGET)
 
 .PHONY: all clean run

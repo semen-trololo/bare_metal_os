@@ -7,7 +7,7 @@
 #include "timer.h"
 #include "pmm.h"
 #include "paging.h"
-
+#include "heap.h"
 void kernel_main() {   
     gdt_install();
     idt_install();
@@ -22,6 +22,7 @@ void kernel_main() {
     k_print(" [OK] Video mode: 80x50\n");
     pmm_init();
     paging_init(); // ВНИМАНИЕ: После этой функции мы в виртуальной памяти!
+    heap_init(); 
      
     // Установка драйвера клавиатуры
     keyboard_install();

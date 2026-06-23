@@ -4,18 +4,24 @@
 #include <stdint.h>
 #include <stddef.h>
 
-// Существующие функции
+// --- Строковые функции ---
 size_t k_strlen(const char* str);
-void k_print(const char* str);
 int k_strcmp(const char* s1, const char* s2);
 int k_strncmp(const char* s1, const char* s2, size_t n);
 
-// === НОВЫЕ ФУНКЦИИ ДЛЯ ЭТАПА 1 ===
-void k_itoa(int value, char* buf, int base);
-int k_atoi(const char* str);
-void k_uitoa(unsigned int value, char* buf, int base);
-void k_printf(const char* fmt, ...);
-int k_atoi(const char* str);
-uint32_t k_atoh(const char* str); // Новая функция: ASCII to Hex
+// --- Память (КРИТИЧЕСКИ ВАЖНО ДЛЯ VMM И HEAP) ---
+void* k_memset(void* ptr, int value, size_t num);
+void* k_memcpy(void* dest, const void* src, size_t num);
+int k_memcmp(const void* s1, const void* s2, size_t n);
 
-#endif
+// --- Вывод и парсинг ---
+void k_print(const char* str);
+void k_printf(const char* fmt, ...);
+
+// --- Конвертация чисел ---
+void k_itoa(int value, char* buf, int base);
+void k_uitoa(unsigned int value, char* buf, int base);
+int k_atoi(const char* str);
+uint32_t k_atoh(const char* str);
+
+#endif // KLIB_H

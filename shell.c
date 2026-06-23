@@ -4,6 +4,7 @@
 #include "klib.h"
 #include "timer.h"
 #include "pmm.h"
+#include "heap.h"
 
 #define CMD_BUFFER_SIZE 256
 #define MAX_ARGS 4
@@ -49,6 +50,7 @@ static void print_help(void) {
     k_print("  pmm alloc [num]  - Allocate physical pages\n");
     k_print("  pmm free <addr>  - Free a physical page (hex)\n");
     k_print("  pmm test         - Run PMM stress tests\n");
+    k_print("  heap <status|alloc|free|test> - Test heap");
 }
 
 // Обработчик команд PMM
@@ -86,7 +88,7 @@ static void handle_pmm(int argc, char args[MAX_ARGS][MAX_ARG_LEN]) {
                 break;
             }
             vga_set_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK);
-            k_printf("[PMM] Allocated: 0x%x\n", addr);
+            k_printf("[PMM] Allocated: %x\n", addr);
             vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
         }
     } 
@@ -180,6 +182,28 @@ static void execute_command(char* buffer) {
         k_printf("  (Raw ticks: %d @ %d Hz)\n", ticks, freq);
         
         vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    }
+    else if (k_strcmp(args[0], "heap") == 0) {
+        if (argc < 2) {
+            k_print("Usage: heap <status|alloc|free|test>\n");
+        } else if (k_strcmp(args[1], "status") == 0) {
+            heap_print_status();
+        } else if (k_strcmp(args[1], "alloc") == 0) {
+            if (argc < 3) { k_print("Usage: heap alloc <size>\n"); return; }
+            uint32_t size = k_atoi(args[2]);
+            void* ptr = kmalloc(size);
+            if (ptr) k_printf("[HEAP] Allocated %u bytes at %p\n", size, ptr);
+            else k_print("[HEAP] Allocation failed!\n");
+        } else if (k_strcmp(args[1], "free") == 0) {
+            if (argc < 3) { k_print("Usage: heap free <addr>\n"); return; }
+            uint32_t addr = k_atoh(args[2]);
+            kfree((void*)addr);
+            k_print("[HEAP] Freed.\n");
+        } else if (k_strcmp(args[1], "test") == 0) {
+            heap_run_tests();
+        } else {
+            k_print("Unknown heap command.\n");
+        }
     }
     else if (k_strcmp(args[0], "pmm") == 0) {
         handle_pmm(argc, args);

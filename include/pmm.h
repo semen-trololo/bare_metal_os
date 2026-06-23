@@ -3,9 +3,9 @@
 
 #include <stdint.h>
 
-#define PMM_MEMORY_SIZE (128 * 1024 * 1024)
+#define PMM_MEMORY_SIZE (512 * 1024 * 1024) // 512 MB
 #define PMM_PAGE_SIZE   4096
-#define PMM_PAGES_COUNT (PMM_MEMORY_SIZE / PMM_PAGE_SIZE)
+#define PMM_PAGES_COUNT (PMM_MEMORY_SIZE / PMM_PAGE_SIZE) // 131072 страницы
 
 void pmm_init(void);
 uint32_t pmm_alloc_page(void);
