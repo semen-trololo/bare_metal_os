@@ -2,13 +2,14 @@
 #include "pmm.h"
 #include "paging.h"
 #include "klib.h"
+#include "vga.h"
 
 #define HEAP_START 0xD0000000
-#define HEAP_SIZE  (4 * 1024 * 1024) // 4 MB
-#define HEAP_PAGES (HEAP_SIZE / 4096) // 1024 pages
+#define HEAP_SIZE  (32 * 1024 * 1024) // 32 MB
+#define HEAP_PAGES (HEAP_SIZE / 4096)  // 8192 pages
 
-#define MAX_ORDER 10 // 2^10 * 4KB = 4MB
-#define TREE_SIZE  2048 // 2^(MAX_ORDER + 1)
+#define MAX_ORDER 13   // 2^13 * 4KB = 32MB
+#define TREE_SIZE  16384 // 2^(13 + 1)
 
 // Статусы узлов дерева
 #define NODE_UNUSED 0 // Внутренний узел, который полностью слит с родителем
@@ -178,11 +179,26 @@ void heap_print_status(void) {
             else alloc_bytes += size;
         }
     }
+    
+    // Динамический расчет размеров из макросов
+    uint32_t total_mb = HEAP_SIZE / (1024 * 1024);
+    uint32_t free_mb = free_bytes / (1024);
+    uint32_t alloc_mb = alloc_bytes / (1024);
+
+    vga_set_color(VGA_COLOR_CYAN, VGA_COLOR_BLACK);
     k_printf("[HEAP] --- Kernel Heap Status ---\n");
+    vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     k_printf("[HEAP] Virtual Base: 0x%x\n", HEAP_START);
-    k_printf("[HEAP] Total Size:   4 MB\n");
-    k_printf("[HEAP] Free:         %u bytes\n", free_bytes);
-    k_printf("[HEAP] Allocated:    %u bytes\n", alloc_bytes);
+    
+    // НИКАКОГО ХАРДКОДА! Только математика.
+    k_printf("[HEAP] Total Size:   %u MB (%u bytes)\n", total_mb, HEAP_SIZE);
+    
+    vga_set_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK);
+    k_printf("[HEAP] Free:         %u KB (%u bytes)\n", free_mb, free_bytes);
+    
+    vga_set_color(VGA_COLOR_YELLOW, VGA_COLOR_BLACK);
+    k_printf("[HEAP] Allocated:    %u KB (%u bytes)\n", alloc_mb, alloc_bytes);
+    vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
 }
 
 void heap_run_tests(void) {
