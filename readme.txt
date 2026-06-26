@@ -13,7 +13,7 @@
 Среда разработки: Linux (Kali / Debian)
 
 [Текущий прогресс]
-Статус: Дни 1-4 (Этапы 4.1, 4.2 и 4.3) завершены полностью. Графический режим, TSS и Syscalls добавлены.
+Статус: Дни 1-4 завершены полностью. День 6.2 (Multiboot Memory Map) завершен.
 Выполнено:
 - Multiboot заголовок, стек ядра 256 КБ, linker.ld.
 - VGA драйвер 80x50 (теперь как fallback).
@@ -21,21 +21,26 @@
 - Framebuffer драйвер с шрифтом 8x16, автоскроллингом и streaming API.
 - GDT (Flat Memory Model + User/TSS сегменты), IDT, ISR/IRQ ASM-заглушки.
 - Remap PIC 8259A (INT 32-47), PS/2 клавиатура с Ring Buffer.
-- Базовый Shell с токенайзером (help, clear, uptime, pmm, heap, syscall).
+- Базовый Shell с токенайзером (help, clear, uptime, pmm, heap, syscall, memmap).
 - k_printf (variadic), PIT таймер 1000 Гц, k_sleep().
 - PMM: битмап на 512 МБ, pmm_alloc_page/free_page, стресс-тесты.
 - VMM: Direct Map 512 МБ, vmm_map_page с динамической аллокацией PT, invlpg и TLB flush.
 - Kernel Heap 32 MB @ 0xD0000000, Buddy System (Implicit Binary Tree), Block Header.
 - Strategy Pattern: klib прозрачно выбирает между framebuffer и VGA.
-- [NEW] TSS (Task State Segment): инициализация, загрузка в TR, настройка ESP0.
-- [NEW] Расширенная GDT: добавлены User Code, User Data и TSS дескрипторы.
-- [NEW] Инфраструктура Syscalls (INT 0x80): DPL=3, таблица сисколлов, sys_write/sys_exit.
+- TSS (Task State Segment): инициализация, загрузка в TR, настройка ESP0.
+- Расширенная GDT: добавлены User Code, User Data и TSS дескрипторы.
+- Инфраструктура Syscalls (INT 0x80): DPL=3, таблица сисколлов, sys_write/sys_exit.
+- [NEW] Парсинг Multiboot E820 Memory Map (динамическое определение RAM).
+- [NEW] Архитектура PMM "Safe by Default" + "Punching Holes" (резервирование).
+- [NEW] Использование Linker Symbols (_kernel_start/_kernel_end) для защиты ядра.
+- [NEW] Исправление Bootstrap Problem (вывод логов до включения Paging).
+- [NEW] Команда `memmap` в Shell для визуализации E820 карты.
 
 [Структура файлов]
-1. include/ - gdt.h, idt.h, isr.h, keyboard.h, klib.h, pic.h, port_io.h, shell.h, vga.h, timer.h, pmm.h, paging.h, heap.h, framebuffer.h, tss.h, syscall.h
+1. include/ - gdt.h, idt.h, isr.h, keyboard.h, klib.h, pic.h, port_io.h, shell.h, vga.h, timer.h, pmm.h, paging.h, heap.h, framebuffer.h, tss.h, syscall.h, multiboot.h
 2. boot.asm - Multiboot, Bochs VBE инициализация, настройка стека, вызов kernel_main.
-3. kernel.c - точка входа, инициализация подсистем, маппинг framebuffer.
-4. linker.ld - карта памяти.
+3. kernel.c - точка входа, правильная последовательность инициализации (Bootstrap).
+4. linker.ld - карта памяти с метками _kernel_start и _kernel_end.
 5. Makefile - автоматизация сборки (с флагами обезвреживания GCC).
 6. vga.c, klib.c, gdt.c, idt.c, isr.c, pic.c, keyboard.c, shell.c, timer.c
 7. framebuffer.c - графический драйвер (Bochs VBE).
@@ -83,11 +88,7 @@ __attribute__((aligned(4096)))
 
 9. МАППИНГ FRAMEBUFFER ЗА ПРЕДЕЛАМИ DIRECT MAP:
 Bochs VBE размещает LFB по адресу 0xFD000000 (~4 GB), что за пределами Direct Map (512 MB).
-КРИТИЧЕСКИ ВАЖНО: после paging_init() и до первого использования framebuffer, его нужно вручную замапить:
-for (uint32_t i = 0; i < pages; i++) {
-    vmm_map_page(fb_phys + i*4096, fb_phys + i*4096, PAGE_PRESENT | PAGE_WRITE);
-}
-Без этого запись в framebuffer вызовет Page Fault или "разноцветные точки" (запись в незамапленную память).
+КРИТИЧЕСКИ ВАЖНО: Фреймбуфер должен быть замаплен в Page Tables ДО включения CR0.PG = 1 (внутри paging_init). Иначе первая запись в FB вызовет Page Fault.
 
 10. TLB ИНВАЛИДАЦИЯ ПРИ СОЗДАНИИ НОВЫХ PAGE TABLES:
 Когда vmm_map_page() создаёт новую Page Table (PDE был 0, стал Present), процессор может не перечитать PDE из-за кэширования.
@@ -97,10 +98,9 @@ __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
 __asm__ volatile("mov %0, %%cr3" : : "r"(cr3));
 Это сбросит весь TLB и гарантирует, что MMU увидит новую таблицу.
 
-11. ПОРЯДОК ИНИЦИАЛИЗАЦИИ С ВИДЕО:
-Framebuffer должен быть инициализирован ДО subsystem, которые выводят отладочную информацию (PMM, VMM, Heap).
-Правильный порядок: fb_init() -> маппинг FB -> fb_clear() -> pmm_init() -> paging_init() -> heap_init().
-Иначе k_printf пойдёт в VGA (невидимый в графическом режиме).
+11. ПОРЯДОК ИНИЦИАЛИЗАЦИИ (BOOTSTRAP PROBLEM):
+Правильный порядок: fb_init() -> pmm_init() -> paging_init() (внутри которой маппится FB и включается CR0.PG) -> heap_init().
+Важно: до вызова paging_init() регистр CR0.PG = 0 (Paging выключен). Это значит, что линейные адреса равны физическим. Ядро может писать напрямую в физический адрес фреймбуфера (0xFD000000) для вывода логов инициализации PMM без настройки Page Tables.
 
 12. IDT GATE DPL ДЛЯ СИСТЕМНЫХ ВЫЗОВОВ:
 По умолчанию ISR/IRQ регистрируются с флагом 0x8E (DPL=0). Чтобы Ring 3 код мог легально вызвать INT 0x80, этот вектор ДОЛЖЕН быть зарегистрирован с флагом 0xEE (Present=1, DPL=3). Иначе процессор сгенерирует General Protection Fault (#GP) при попытке user-space кода сделать `int 0x80`.
@@ -108,14 +108,24 @@ Framebuffer должен быть инициализирован ДО subsystem,
 13. TSS И АППАРАТНОЕ ПЕРЕКЛЮЧЕНИЕ СТЕКА:
 При прерывании из Ring 3 процессор аппаратно читает SS0 и ESP0 из структуры TSS и переключается на безопасный стек ядра. Без корректно настроенного TSS (и загруженного через `ltr` регистра TR) любое прерывание (например, таймер) из User Mode приведет к Triple Fault (Invalid TSS / Stack Fault).
 
+14. MULTIBOOT E820 И SAFE BY DEFAULT:
+При инициализации PMM сначала ВСЕ страницы в битмапе помечаются как ЗАНЯТЫЕ. Затем парсится E820 карта и освобождаются только регионы с type=1 (Available). В конце "пробиваются дыры" (Punching Holes) — явно резервируются нижний 1 МБ и образ ядра. Это защищает от выделения памяти поверх ACPI/BIOS даже при багах в парсере.
+При итерации по E820 массиву шаг указателя равен: `mmap->size + sizeof(uint32_t)`.
+
+15. LINKER SYMBOLS ДЛЯ РЕЗЕРВИРОВАНИЯ ПАМЯТИ:
+Вместо хардкода размера ядра (например, "2 МБ"), используются метки `_kernel_start` и `_kernel_end` из linker.ld. В C они объявляются как `extern uint8_t _kernel_start[];` и кастуются в `uintptr_t`. Это гарантирует защиту ядра, стека и статических массивов (.bss) при любом изменении кода.
+
+16. ОГРАНИЧЕНИЯ САМОПИСНОГО K_PRINTF:
+Наш k_printf поддерживает только базовые спецификаторы (%d, %u, %x, %p, %s, %c, %%). Модификаторы ширины и заполнения (например, `%08x` или `%6u`) НЕ ПОДДЕРЖИВАЮТСЯ. Их использование ломает парсинг `va_list`, из-за чего спецификатор `%s` может прочитать число из стека вместо указателя на строку, что приведет к чтению невалидной памяти и Kernel Panic (Page Fault).
+
 ========================================================================
 АРХИТЕКТУРА ОС (ПОДСИСТЕМЫ)
 ========================================================================
 [ЗАГРУЗКА И ИНИЦИАЛИЗАЦИЯ]
-1. Multiboot header -> GRUB переключает в Protected Mode.
-2. boot.asm: Bochs VBE init через I/O порты -> настройка стека (256 КБ @ stack_top) -> передача fb_params.
-3. kernel_main: последовательная инициализация:
-FB -> маппинг FB -> GDT -> TSS -> IDT -> Syscalls -> PIC (remap) -> Keyboard -> Timer -> PMM -> VMM -> Heap -> Shell.
+1. Multiboot header -> GRUB переключает в Protected Mode (CR0.PG=0).
+2. boot.asm: Bochs VBE init через I/O порты -> настройка стека (256 КБ @ stack_top) -> передача fb_params и multiboot_info.
+3. kernel_main:
+   FB init (прямая запись в_phys_ addr) -> GDT -> TSS -> IDT -> Syscalls -> PIC -> Keyboard -> Timer -> PMM (парсинг E820) -> VMM (маппинг FB + включение CR0.PG=1) -> Heap -> Shell.
 
 [ГРАФИЧЕСКИЙ РЕЖИМ (Bochs VBE)]
 Инициализация (Real Mode в boot.asm):
@@ -142,13 +152,16 @@ Shell и все подсистемы (PMM, Heap, Timer) используют k_p
 [УПРАВЛЕНИЕ ПАМЯТЬЮ]
 Физическая память (PMM):
 - Битмап: 1 бит = 4 КБ страница. 16 КБ битмапа на 512 МБ RAM.
-- Алгоритм First Fit. Первые 2 МБ зарезервированы (BIOS, VGA, ядро, битмап).
+- Алгоритм First Fit.
+- Инициализация: Safe by Default (все занято) -> Парсинг Multiboot E820 (освобождение Available) -> Punching Holes (резервирование нижнего 1 МБ и образа ядра через Linker Symbols).
 - API: pmm_alloc_page() -> phys_addr (0 при OOM), pmm_free_page(phys_addr).
+- Диагностика: pmm_get_memory_map() для команды `memmap`.
 Виртуальная память (VMM):
 - 2-уровневая трансляция: Page Directory (10 бит) -> Page Table (10 бит) -> Offset (12 бит).
 - vmm_map_page(virt, phys, flags) с динамической аллокацией PT через PMM.
 - Инвалидация TLB: invlpg для отдельных страниц, CR3 reload для новых Page Tables.
 - Direct Map: первые 512 МБ (Virt == Phys) для bootstrap и редактирования PT.
+- Маппинг FB: выполняется внутри paging_init() до включения CR0.PG.
 Kernel Heap:
 - 32 MB пул @ 0xD0000000 (Pre-allocated через PMM + VMM).
 - Buddy System: Implicit Binary Tree Array (16 КБ).
@@ -210,7 +223,7 @@ void* k_memcpy(void* dest, const void* src, size_t num);
 int k_memcmp(const void* s1, const void* s2, size_t n);
 void k_itoa(int value, char* buf, int base);
 void k_uitoa(unsigned int value, char* buf, int base);
-void k_printf(const char* fmt, ...);  // %d %u %x %p %s %c %%
+void k_printf(const char* fmt, ...);  // %d %u %x %p %s %c %% (БЕЗ модификаторов ширины!)
 int k_atoi(const char* str);
 uint32_t k_atoh(const char* str);  // HEX parsing
 
@@ -245,10 +258,21 @@ void keyboard_install(void);
 char k_getchar(void);
 void shell_run(void);
 
+[MULTIBOOT.H]
+#define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
+#define MULTIBOOT_INFO_MEM_MAP     0x00000040
+typedef struct { ... } __attribute__((packed)) multiboot_info_t;
+typedef struct { uint32_t size; uint64_t addr; uint64_t len; uint32_t type; } __attribute__((packed)) multiboot_memory_map_t;
+
 [PMM.H]
-void pmm_init(void);
+typedef struct { uint64_t addr; uint64_t len; uint32_t type; } e820_entry_t;
+void pmm_init(multiboot_info_t* info);
 uint32_t pmm_alloc_page(void);  // Returns 0 on OOM
 void pmm_free_page(uint32_t phys_addr);
+uint32_t pmm_get_used_pages(void);
+uint32_t pmm_get_free_pages(void);
+uint32_t pmm_get_total_pages(void);
+const e820_entry_t* pmm_get_memory_map(uint32_t* count);
 
 [PAGING.H]
 void paging_init(void);
@@ -318,11 +342,14 @@ COLOR_GREY=0x00808080, COLOR_DARKGREY=0x00404040, COLOR_LIGHT_GREY=0x00C0C0C0
 - Identity mapping первых 4 МБ для bootstrap.
 - Переключение на higher half через `jump`.
 - Обновление linker.ld: виртуальные адреса + 0xC0000000.
-[ ] 6.2 Multiboot Memory Map (E820)
-- Парсинг Multiboot info structure.
+[x] 6.2 Multiboot Memory Map (E820)
+- Парсинг Multiboot info structure (mmap_addr, mmap_length).
 - Обработка memory map entries (available/reserved/ACPI).
-- Динамическое определение доступной RAM.
+- Динамическое определение доступной RAM (вместо хардкода).
+- Архитектура Safe by Default + Punching Holes.
+- Использование Linker Symbols для резервирования ядра.
 - Обход PCI hole (0xE0000000-0xF0000000).
+- Команда `memmap` в Shell.
 [ ] 6.3 On-demand Paging
 - Lazy allocation: страницы выделяются при Page Fault.
 - PF handler: аллокация физической страницы, маппинг.
@@ -406,28 +433,24 @@ COLOR_GREY=0x00808080, COLOR_DARKGREY=0x00404040, COLOR_LIGHT_GREY=0x00C0C0C0
 - Стабильность > Фичи. Ядро не должно падать при некорректном вводе в Shell.
 - Тесты перед коммитом. Каждый новый модуль должен иметь команду в Shell для проверки.
 - Документация параллельно с кодом.
-
 2. Debug Techniques:
 - Serial port output (COM1 @ 0x3F8) для логирования без VGA.
 - QEMU `-d int` для трассировки прерываний.
 - Bochs debugger для step-by-step отладки ASM.
 - Triple Fault analysis: анализ последней инструкции перед reboot.
-
 3. Security (Постепенное внедрение):
 - User pointer validation (copy_from_user / copy_to_user).
 - Stack canaries (если позволит freestanding environment).
 - NX bit (No Execute) для data pages.
 - ASLR (Address Space Layout Randomization) для user space.
-
 4. Performance:
 - Batch page allocations (выделять по несколько страниц за раз).
 - Lazy TLB invalidation (инвалидировать TLB только при необходимости).
 - Kernel preemption points (точки вытеснения в long-running loops).
-
 5. Графический режим:
-- Всегда мапить framebuffer после paging_init() и до первого использования.
+- Маппинг framebuffer внутри paging_init() непосредственно перед включением CR0.PG.
 - Инвалидировать TLB (через CR3 reload) при создании новых Page Tables.
-- Инициализировать framebuffer ДО подсистем с отладочным выводом.
+- Инициализировать framebuffer ДО подсистем с отладочным выводом (используя CR0.PG=0).
 - Использовать Strategy Pattern для прозрачного переключения между видео-бэкендами.
 
 ========================================================================

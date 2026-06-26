@@ -1,12 +1,16 @@
 #include "paging.h"
 #include "pmm.h"
 #include "klib.h"
+#include "framebuffer.h" // <-- ДОБАВЛЕНО для доступа к fb_params
 
 // Статические таблицы для Direct Map (Bootstrap)
 // 128 таблиц * 4 МБ = 512 МБ покрытого пространства.
 // Занимают 512 КБ в секции .bss. Выровнены по границе 4 КБ.
 static uint32_t page_directory[1024] __attribute__((aligned(4096)));
 static uint32_t page_tables[128][1024] __attribute__((aligned(4096))); 
+
+// Внешняя структура из boot.asm
+extern framebuffer_info_t fb_params;
 
 // ASM-функция для загрузки CR3
 static inline void load_page_directory(uint32_t pd_phys_addr) {
@@ -46,10 +50,52 @@ void paging_init(void) {
 
     k_printf("[Paging] Direct mapping configured for first 512 MB.\n");
 
-    // 4. Загружаем адрес Page Directory в регистр CR3
+    // ========================================================================
+    // 4. КРИТИЧЕСКИ ВАЖНО: Маппинг Framebuffer ДО включения Paging!
+    // ========================================================================
+    if (fb_params.address != 0) {
+        uint32_t fb_phys = fb_params.address;
+        uint32_t fb_size = fb_params.width * fb_params.height * 4;
+        uint32_t pages = (fb_size + 4095) / 4096;
+        
+        k_printf("[Paging] Mapping framebuffer @ 0x%x (%u pages)...\n", fb_phys, pages);
+        
+        for (uint32_t i = 0; i < pages; i++) {
+            uint32_t addr = fb_phys + i * 4096;
+            uint32_t dir_index = addr >> 22;
+            uint32_t table_index = (addr >> 12) & 0x3FF;
+            
+            // Если Page Table для этого 4 МБ блока еще не создана
+            if (!(page_directory[dir_index] & PAGE_PRESENT)) {
+                uint32_t new_pt_phys = pmm_alloc_page();
+                if (new_pt_phys == 0) {
+                    k_printf("[Paging] FATAL: OOM for Framebuffer PT!\n");
+                    while(1) __asm__ volatile("hlt");
+                }
+                
+                // Очищаем новую Page Table
+                uint32_t* new_pt = (uint32_t*)new_pt_phys;
+                for (int j = 0; j < 1024; j++) {
+                    new_pt[j] = 0;
+                }
+                
+                // Записываем PDE
+                page_directory[dir_index] = new_pt_phys | PAGE_PRESENT | PAGE_WRITE;
+            }
+            
+            // Записываем PTE для фреймбуфера
+            uint32_t pt_phys = page_directory[dir_index] & 0xFFFFF000;
+            uint32_t* pt = (uint32_t*)pt_phys;
+            pt[table_index] = addr | PAGE_PRESENT | PAGE_WRITE;
+        }
+        
+        k_printf("[Paging] Framebuffer mapped successfully.\n");
+    }
+
+    // 5. Загружаем адрес Page Directory в регистр CR3
     load_page_directory((uint32_t)&page_directory);
 
-    // 5. Включаем MMU (Прыжок веры!)
+    // 6. Включаем MMU (Прыжок веры!)
     enable_paging();
 
     k_printf("[Paging] MMU enabled successfully. Welcome to Virtual Memory!\n");

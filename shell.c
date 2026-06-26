@@ -43,6 +43,7 @@ static void print_help(void) {
     k_print("  help             - Show this help message\n");
     k_print("  clear            - Clear the screen\n");
     k_print("  uptime           - Show system uptime\n");
+    k_print("  memmap           - Show E820 physical memory map\n");
     
     k_set_color(VGA_COLOR_YELLOW, VGA_COLOR_BLACK);
     k_print("  --- Memory Management (PMM) ---\n");
@@ -150,7 +151,79 @@ static void handle_pmm(int argc, char args[MAX_ARGS][MAX_ARG_LEN]) {
         k_printf("Unknown pmm command: %s\n", args[1]);
         k_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
     }
+}static const char* get_e820_type_string(uint32_t type) {
+    switch (type) {
+        case 1: return "Available";
+        case 2: return "Reserved";
+        case 3: return "ACPI Reclaim";
+        case 4: return "ACPI NVS";
+        case 5: return "Bad RAM";
+        default: return "Unknown";
+    }
 }
+
+static void handle_memmap(void) {
+    uint32_t count = 0;
+    const e820_entry_t* map = pmm_get_memory_map(&count);
+    
+    if (count == 0) {
+        k_set_color(VGA_COLOR_RED, VGA_COLOR_BLACK);
+        k_print("[MEMMAP] ERROR: E820 map is empty!\n");
+        k_set_color(VGA_COLOR_YELLOW, VGA_COLOR_BLACK);
+        k_print("[MEMMAP] Check if MBOOT_MMAP is added to boot.asm flags.\n");
+        k_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+        return;
+    }
+
+    k_set_color(VGA_COLOR_CYAN, VGA_COLOR_BLACK);
+    k_print("\n[E820] --- Physical Memory Map ---\n");
+    k_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    
+    uint64_t total_available = 0;
+    uint64_t total_reserved = 0;
+    
+    for (uint32_t i = 0; i < count; i++) {
+        // Приводим к 32-битному виду
+        uint32_t base_lo = (uint32_t)map[i].addr;
+        uint32_t end_lo = (uint32_t)(map[i].addr + map[i].len - 1);
+        uint32_t len_kb = (map[i].len >= 1024) ? (uint32_t)(map[i].len / 1024) : 1;
+        
+        // Цветовая дифференциация
+        if (map[i].type == 1) {
+            k_set_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK);
+            total_available += map[i].len;
+        } else if (map[i].type == 3) {
+            k_set_color(VGA_COLOR_CYAN, VGA_COLOR_BLACK);
+            total_available += map[i].len;
+        } else {
+            k_set_color(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+            total_reserved += map[i].len;
+        }
+        
+        // БЕЗОПАСНЫЙ ВЫВОД: Только %x, %u, %s без модификаторов ширины!
+        k_printf("  Region %u: 0x%x - 0x%x | %u KB | ", i, base_lo, end_lo, len_kb);
+        
+        // Тип выводим отдельным вызовом k_print, чтобы не зависеть от %s в k_printf
+        switch (map[i].type) {
+            case 1: k_print("Available\n"); break;
+            case 2: k_print("Reserved\n"); break;
+            case 3: k_print("ACPI Reclaim\n"); break;
+            case 4: k_print("ACPI NVS\n"); break;
+            case 5: k_print("Bad RAM\n"); break;
+            default: k_print("Unknown\n"); break;
+        }
+    }
+    
+    k_set_color(VGA_COLOR_CYAN, VGA_COLOR_BLACK);
+    k_print("------------------------------------\n");
+    k_set_color(VGA_COLOR_LIGHT_GREEN, VGA_COLOR_BLACK);
+    k_printf("  Total Available: %u MB\n", (uint32_t)(total_available / (1024 * 1024)));
+    k_set_color(VGA_COLOR_LIGHT_RED, VGA_COLOR_BLACK);
+    k_printf("  Total Reserved:  %u MB\n", (uint32_t)(total_reserved / (1024 * 1024)));
+    k_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
+    k_print("\n");
+}
+
 
 static void execute_command(char* buffer) {
     char args[MAX_ARGS][MAX_ARG_LEN];
@@ -223,6 +296,9 @@ static void execute_command(char* buffer) {
         } else {
             k_print("Unknown heap command.\n");
         }
+    }
+    else if (k_strcmp(args[0], "memmap") == 0) {
+        handle_memmap();
     }
     else if (k_strcmp(args[0], "pmm") == 0) {
         handle_pmm(argc, args);
