@@ -2,7 +2,7 @@
 #include <stddef.h>
 
 // Количество дескрипторов в нашей GDT
-#define GDT_ENTRIES 3
+#define GDT_ENTRIES 6
 
 // Массив дескрипторов (статический, живёт в секции .data)
 static struct gdt_entry gdt[GDT_ENTRIES];
@@ -15,7 +15,7 @@ static struct gdt_ptr gp;
 extern void gdt_flush(uint32_t gdt_ptr);
 
 // Вспомогательная функция для заполнения одного дескриптора
-static void gdt_set_gate(int num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran) {
+void gdt_set_gate(int num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran) {
     // Заполняем базу (32 бита разбиты на 3 части)
     gdt[num].base_low    = (base & 0xFFFF);          // Биты 0-15
     gdt[num].base_middle = (base >> 16) & 0xFF;      // Биты 16-23
@@ -78,6 +78,18 @@ void gdt_install(void) {
     //   - Accessed = 0
     // Granularity: 0xCF (аналогично Code segment)
     gdt_set_gate(2, 0, 0xFFFFFFFF, 0x92, 0xCF);
+
+    // ========================================
+    // Дескриптор 3: User Code Segment (селектор 0x18)
+    // ========================================
+    // Access: 0xFA (Present=1, DPL=3, S=1, Type=1010b - Exec/Read)
+    gdt_set_gate(3, 0, 0xFFFFFFFF, 0xFA, 0xCF);
+
+    // ========================================
+    // Дескриптор 4: User Data Segment (селектор 0x20)
+    // ========================================
+    // Access: 0xF2 (Present=1, DPL=3, S=1, Type=0010b - Data/Write)
+    gdt_set_gate(4, 0, 0xFFFFFFFF, 0xF2, 0xCF);
 
     // Загружаем GDT в процессор и обновляем сегментные регистры
     gdt_flush((uint32_t)&gp);

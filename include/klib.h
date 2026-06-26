@@ -15,8 +15,13 @@ void* k_memcpy(void* dest, const void* src, size_t num);
 int k_memcmp(const void* s1, const void* s2, size_t n);
 
 // --- Вывод и парсинг ---
+// НОВОЕ: универсальные функции для shell
+void k_putchar(char c);  // Диспетчер: framebuffer или VGA
+void k_clear(void);      // Очищает и framebuffer и VGA
 void k_print(const char* str);
 void k_printf(const char* fmt, ...);
+// НОВОЕ: универсальная установка цвета (работает и для VGA, и для framebuffer)
+void k_set_color(uint8_t vga_fg, uint8_t vga_bg);
 
 // --- Конвертация чисел ---
 void k_itoa(int value, char* buf, int base);

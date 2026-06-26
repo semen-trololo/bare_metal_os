@@ -56,39 +56,32 @@ void paging_init(void) {
 }
 
 void vmm_map_page(uint32_t virt, uint32_t phys, uint32_t flags) {
-    // Извлекаем индексы из виртуального адреса
     uint32_t dir_index = virt >> 22;
     uint32_t table_index = (virt >> 12) & 0x3FF;
 
     // 1. Если Page Table для этого куска памяти еще не создана
     if (!(page_directory[dir_index] & PAGE_PRESENT)) {
-        // Выделяем физическую страницу под саму Page Table
         uint32_t new_pt_phys = pmm_alloc_page();
         if (new_pt_phys == 0) {
             k_printf("[VMM] FATAL: Out of memory for Page Table!\n");
-            return; // В реальной ОС здесь был бы kernel panic
+            return;
         }
         
-        // МАГИЯ DIRECT MAP: 
-        // new_pt_phys - это физический адрес (например, 0x00200000).
-        // Так как первые 512 МБ замаплены как Virt == Phys, мы можем 
-        // просто скастовать его к указателю и очистить через k_memset!
         k_memset((void*)new_pt_phys, 0, 4096); 
-        
-        // Прописываем адрес новой таблицы в Directory
         page_directory[dir_index] = new_pt_phys | PAGE_PRESENT | PAGE_WRITE;
+        
+        // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ:
+        // После изменения PDE нужно инвалидировать TLB для всего 4 MB диапазона.
+        // Проще всего - перезагрузить CR3 (сбросит весь TLB, но это безопасно).
+        uint32_t cr3;
+        __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+        __asm__ volatile("mov %0, %%cr3" : : "r"(cr3));
     }
 
-    // 2. Достаем физический адрес нужной Page Table
-    // Маска 0xFFFFF000 убирает младшие биты (флаги), оставляя только адрес
     uint32_t pt_phys = page_directory[dir_index] & 0xFFFFF000; 
-    
-    // 3. Записываем связь (PTE - Page Table Entry)
-    // Снова спасает Direct Map: мы обращаемся к таблице по её физ. адресу
     uint32_t* pt = (uint32_t*)pt_phys; 
     pt[table_index] = phys | flags;
 
-    // 4. Говорим MMU сбросить кэш (TLB) для этого виртуального адреса
-    // Без этого процессор может использовать старую, неактуальную запись из кэша
+    // Инвалидируем TLB для этого конкретного виртуального адреса
     __asm__ volatile("invlpg (%0)" : : "r"(virt) : "memory");
 }

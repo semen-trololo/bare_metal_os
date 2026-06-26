@@ -220,7 +220,7 @@ void heap_run_tests(void) {
     kfree(p3);
     
     k_print("[HEAP TEST] 4. OOM protection... ");
-    void* p4 = kmalloc(5 * 1024 * 1024);
+    void* p4 = kmalloc(40 * 1024 * 1024);  // 40 MB > 32 MB heap
     if (!p4) k_print("[OK]\n");
     else k_print("[FAIL]\n");
     

@@ -58,6 +58,6 @@ clean:
 
 # Запуск в QEMU
 run: $(TARGET)
-	qemu-system-i386 -m 512M -kernel $(TARGET)
+	qemu-system-i386 -kernel $(TARGET) -m 512M -vga std -serial stdio
 
 .PHONY: all clean run

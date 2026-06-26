@@ -21,6 +21,7 @@ struct gdt_ptr {
     uint32_t base;         // Линейный адрес первого дескриптора
 } __attribute__((packed));
 
+void gdt_set_gate(int num, uint32_t base, uint32_t limit, uint8_t access, uint8_t gran);
 // Функция инициализации GDT
 void gdt_install(void);
 

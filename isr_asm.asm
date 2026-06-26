@@ -76,6 +76,7 @@ ISR_NOERRCODE 28  ; Hypervisor Injection Exception
 ISR_NOERRCODE 29  ; VMM Communication Exception
 ISR_ERRCODE   30  ; Security Exception
 ISR_NOERRCODE 31  ; Reserved
+ISR_NOERRCODE 128 ; System Call (INT 0x80)
 
 ; ============================================
 ; Генерируем все IRQ (0-15)

@@ -1,9 +1,54 @@
 #include "klib.h"
 #include "vga.h"
+#include "framebuffer.h"
 #include <stdarg.h>
 
 // ==========================================
-// РАБОТА С ПАМЯТЬЮ (Нужно для VMM и Heap)
+// ДИСПЕТЧЕР ВЫВОДА (Strategy Pattern)
+// ==========================================
+
+// Внутренний диспетчер: выбирает между framebuffer и VGA
+static void output_char(char c) {
+    if (fb_is_available()) {
+        fb_putc(c);
+    } else {
+        vga_putc(c);
+    }
+}
+
+// Установка цвета одновременно для framebuffer и VGA
+// VGA-цвета (0-15) мапим на близкие RGB-значения
+void k_set_color(uint8_t vga_fg, uint8_t vga_bg) {
+    // Устанавливаем VGA (на случай fallback)
+    vga_set_color(vga_fg, vga_bg);
+    
+    // Параллельно синхронизируем framebuffer-цвета
+    if (fb_is_available()) {
+        // Маппинг VGA -> RGB (упрощенная палитра)
+        static const uint32_t vga_to_rgb[16] = {
+            0x00000000, // BLACK
+            0x000000AA, // BLUE
+            0x0000AA00, // GREEN
+            0x0000AAAA, // CYAN
+            0x00AA0000, // RED
+            0x00AA00AA, // MAGENTA
+            0x00AA5500, // BROWN
+            0x00AAAAAA, // LIGHT_GREY
+            0x00555555, // DARK_GREY
+            0x005555FF, // LIGHT_BLUE
+            0x0055FF55, // LIGHT_GREEN
+            0x0055FFFF, // LIGHT_CYAN
+            0x00FF5555, // LIGHT_RED
+            0x00FF55FF, // LIGHT_MAGENTA
+            0x00FFFF55, // YELLOW
+            0x00FFFFFF  // WHITE
+        };
+        fb_set_color(vga_to_rgb[vga_fg & 0x0F], vga_to_rgb[vga_bg & 0x0F]);
+    }
+}
+
+// ==========================================
+// РАБОТА С ПАМЯТЬЮ
 // ==========================================
 
 void* k_memset(void* ptr, int value, size_t num) {
@@ -45,7 +90,7 @@ size_t k_strlen(const char* str) {
 
 void k_print(const char* str) {
     if (!str) return;
-    while (*str) vga_putc(*str++);
+    while (*str) output_char(*str++);
 }
 
 int k_strcmp(const char* s1, const char* s2) {
@@ -74,7 +119,7 @@ void k_printf(const char* fmt, ...) {
                     k_print(buf);
                     break;
                 }
-                case 'u': { // НОВОЕ: Unsigned Decimal
+                case 'u': {
                     unsigned int val = va_arg(args, unsigned int);
                     char buf[16];
                     k_uitoa(val, buf, 10);
@@ -89,7 +134,7 @@ void k_printf(const char* fmt, ...) {
                     k_print(buf);
                     break;
                 }
-                case 'p': { // НОВОЕ: Pointer (для адресов памяти)
+                case 'p': {
                     void* ptr = va_arg(args, void*);
                     k_print("0x");
                     char buf[16];
@@ -104,20 +149,38 @@ void k_printf(const char* fmt, ...) {
                 }
                 case 'c': {
                     char c = (char)va_arg(args, int);
-                    vga_putc(c);
+                    output_char(c);
                     break;
                 }
-                case '%': vga_putc('%'); break;
+                case '%': output_char('%'); break;
                 case '\0': goto end;
-                default: vga_putc('%'); vga_putc(*fmt); break;
+                default: output_char('%'); output_char(*fmt); break;
             }
         } else {
-            vga_putc(*fmt);
+            output_char(*fmt);
         }
         fmt++;
     }
 end:
     va_end(args);
+}
+
+// ==========================================
+// УНИВЕРСАЛЬНЫЕ ФУНКЦИИ ДЛЯ SHELL
+// ==========================================
+
+// Универсальный вывод одного символа (для shell input echo)
+void k_putchar(char c) {
+    output_char(c);
+}
+
+// Универсальная очистка экрана
+void k_clear(void) {
+    if (fb_is_available()) {
+        fb_clear(COLOR_BLACK);
+    } else {
+        clear();  // существующая VGA функция
+    }
 }
 
 // ==========================================
@@ -158,7 +221,6 @@ void k_itoa(int value, char* buf, int base) {
     if (value == 0) { buf[0] = '0'; buf[1] = '\0'; return; }
     
     unsigned int uvalue;
-    // ИСПРАВЛЕНИЕ UB: Безопасная работа с INT_MIN
     if (value < 0 && base == 10) {
         negative = 1;
         uvalue = -(unsigned int)value; 

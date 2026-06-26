@@ -47,3 +47,12 @@ idt_flush:
     mov eax, [esp+4]      ; Получаем указатель на idt_ptr
     lidt [eax]            ; Загружаем IDT в процессор
     ret
+; ============================================
+; void tss_flush();
+; Загружает селектор TSS (0x28) в регистр TR
+; ============================================
+global tss_flush
+tss_flush:
+    mov ax, 0x28      ; Селектор TSS (индекс 5 * 8 = 40 = 0x28)
+    ltr ax            ; Load Task Register
+    ret
